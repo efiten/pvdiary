@@ -1,0 +1,11 @@
+.git
+.claude
+.superpowers
+weerstation
+weerstation.zip
+dist
+*.db
+web/node_modules
+web/dist
+web/test-results
+web/playwright-report

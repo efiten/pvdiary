@@ -1,0 +1,14 @@
+services:
+  pvdiary:
+    build: .
+    image: pvdiary
+    container_name: pvdiary
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file: .env
+    volumes:
+      - pvdiary-data:/data
+
+volumes:
+  pvdiary-data:

@@ -1,0 +1,243 @@
+[
+  {
+    "id": "pvfill_note",
+    "type": "comment",
+    "z": "pvdiary_ingest",
+    "name": "Dagelijkse backfill: vult gaten in de pvdiary-samples uit de HA-recorder. Draait na zonsondergang (vandaag) en om 00:10 (de dag ervoor).",
+    "info": "",
+    "x": 60,
+    "y": 320,
+    "wires": []
+  },
+  {
+    "id": "pvfill_sunset",
+    "type": "server-state-changed",
+    "z": "pvdiary_ingest",
+    "name": "zon onder",
+    "server": "REPLACE_WITH_SERVER_ID",
+    "version": 6,
+    "outputs": 1,
+    "exposeAsEntityConfig": "",
+    "entities": {
+      "entity": [
+        "sun.sun"
+      ],
+      "substring": [],
+      "regex": []
+    },
+    "outputInitially": false,
+    "stateType": "str",
+    "ifState": "below_horizon",
+    "ifStateType": "str",
+    "ifStateOperator": "is",
+    "outputOnlyOnStateChange": true,
+    "for": "0",
+    "forType": "num",
+    "forUnits": "minutes",
+    "ignorePrevStateNull": true,
+    "ignorePrevStateUnknown": true,
+    "ignorePrevStateUnavailable": true,
+    "ignoreCurrentStateUnknown": true,
+    "ignoreCurrentStateUnavailable": true,
+    "outputProperties": [
+      {
+        "property": "topic",
+        "propertyType": "msg",
+        "value": "today",
+        "valueType": "str"
+      }
+    ],
+    "x": 100,
+    "y": 380,
+    "wires": [
+      [
+        "pvfill_delay"
+      ]
+    ]
+  },
+  {
+    "id": "pvfill_delay",
+    "type": "delay",
+    "z": "pvdiary_ingest",
+    "name": "+30 min",
+    "pauseType": "delay",
+    "timeout": "30",
+    "timeoutUnits": "minutes",
+    "rate": "1",
+    "nbRateUnits": "1",
+    "rateUnits": "second",
+    "randomFirst": "1",
+    "randomLast": "5",
+    "randomUnits": "seconds",
+    "drop": false,
+    "allowrate": false,
+    "outputs": 1,
+    "x": 250,
+    "y": 380,
+    "wires": [
+      [
+        "pvfill_date"
+      ]
+    ]
+  },
+  {
+    "id": "pvfill_cron",
+    "type": "inject",
+    "z": "pvdiary_ingest",
+    "name": "00:10 (gisteren)",
+    "props": [
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "10 0 * * *",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "yesterday",
+    "x": 130,
+    "y": 440,
+    "wires": [
+      [
+        "pvfill_date"
+      ]
+    ]
+  },
+  {
+    "id": "pvfill_date",
+    "type": "function",
+    "z": "pvdiary_ingest",
+    "name": "bepaal datum",
+    "func": "// Doeldatum in Europe/Brussels. topic 'yesterday' -> de dag ervoor.\nconst now = Date.now();\nconst t = msg.topic === 'yesterday' ? now - 86400000 : now;\nconst date = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Brussels' })\n    .format(new Date(t)).replaceAll('-', '');\nmsg.pvDate = date;\nmsg.method = 'GET';\nmsg.url = '__PVDIARY_URL__/api/day?date=' + date + '&collector=__COLLECTOR__';\nmsg.headers = {};\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 400,
+    "wires": [
+      [
+        "pvfill_get_day"
+      ]
+    ]
+  },
+  {
+    "id": "pvfill_get_day",
+    "type": "http request",
+    "z": "pvdiary_ingest",
+    "name": "GET /api/day",
+    "method": "GET",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 590,
+    "y": 400,
+    "wires": [
+      [
+        "pvfill_gaps"
+      ]
+    ],
+    "customHeaders": true,
+    "headerKeyInput": "headers"
+  },
+  {
+    "id": "pvfill_gaps",
+    "type": "function",
+    "z": "pvdiary_ingest",
+    "name": "bereken gaten",
+    "func": "// Welke 5-min slots ontbreken vandaag? Bouw daarna de HA-history-URL.\nconst TZ = 'Europe/Brussels';\nfunction tzOffsetMs(dt) {\n    const s = new Intl.DateTimeFormat('en-US', {\n        timeZone: TZ, hour12: false, year: 'numeric', month: '2-digit',\n        day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',\n    }).format(dt);\n    const [dd, tt] = s.split(', ');\n    const [mm, da, yy] = dd.split('/');\n    return Date.parse(yy + '-' + mm + '-' + da + 'T' + tt.replace('24:', '00:') + 'Z') - dt.getTime();\n}\n// lokale middernacht van y-m-d als unix-seconden (dst-proof)\nfunction midnight(y, m, d) {\n    const guess = Date.UTC(y, m - 1, d, 12, 0, 0);       // middag: nooit een dst-rand\n    const off = tzOffsetMs(new Date(guess));\n    return (Date.UTC(y, m - 1, d, 0, 0, 0) - off) / 1000;\n}\n\nconst date = msg.pvDate;\nconst y = +date.slice(0, 4), m = +date.slice(4, 6), d = +date.slice(6, 8);\nconst nd = new Date(Date.UTC(y, m - 1, d + 1));\nconst start = midnight(y, m, d);\nconst dayEnd = midnight(nd.getUTCFullYear(), nd.getUTCMonth() + 1, nd.getUTCDate());\nconst end = Math.min(dayEnd, Math.floor(Date.now() / 1000));\n\nconst have = new Set(((msg.payload && msg.payload.samples) || []).map((s) => s[0]));\nconst missing = [];\nfor (let t = Math.ceil(start / 300) * 300; t < end; t += 300) {\n    if (!have.has(t)) missing.push(t);\n}\nif (!missing.length) {\n    node.status({ fill: 'green', shape: 'dot', text: date + ': geen gaten' });\n    return null;\n}\nmsg.pvMissing = missing;\nmsg.method = 'GET';\nmsg.url = 'http://supervisor/core/api/history/period/'\n    + new Date((start - 1800) * 1000).toISOString()\n    + '?filter_entity_id=__PV_POWER_ENTITY__'\n    + '&end_time=' + new Date((end + 300) * 1000).toISOString()\n    + '&minimal_response&no_attributes&significant_changes_only=0';\nmsg.headers = { Authorization: 'Bearer ' + env.get('SUPERVISOR_TOKEN') };\nnode.status({ text: date + ': ' + missing.length + ' gaten' });\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 770,
+    "y": 400,
+    "wires": [
+      [
+        "pvfill_get_hist"
+      ]
+    ]
+  },
+  {
+    "id": "pvfill_get_hist",
+    "type": "http request",
+    "z": "pvdiary_ingest",
+    "name": "GET HA history",
+    "method": "GET",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 950,
+    "y": 400,
+    "wires": [
+      [
+        "pvfill_resolve"
+      ]
+    ],
+    "customHeaders": true,
+    "headerKeyInput": "headers"
+  },
+  {
+    "id": "pvfill_resolve",
+    "type": "function",
+    "z": "pvdiary_ingest",
+    "name": "los gaten op",
+    "func": "// Vul elk gat met de HA-meting op dat moment. Alleen als we het zeker weten:\n// - sensor was live rond dat tijdstip (< 15 min tussen de omliggende metingen)\n//   -> laatste bekende waarde\n// - anders, als de meting ervoor en erna allebei 0 W was -> 0 W (nacht/uit)\n// - anders overslaan; dan lag de bron plat en is de echte waarde onbekend.\nconst LIVE = 900;\nconst states = [];\nfor (const series of (msg.payload || [])) {\n    for (const st of series) {\n        const t = Math.floor(Date.parse(st.last_updated || st.last_changed) / 1000);\n        const v = Number(st.state);\n        states.push([t, Number.isFinite(v) ? v : null]);\n    }\n}\nstates.sort((a, b) => a[0] - b[0]);\n\nconst out = [];\nlet skipped = 0;\nfor (const ts of msg.pvMissing) {\n    let prev = null, next = null;\n    for (const s of states) {\n        if (s[0] <= ts) prev = s;\n        else { next = s; break; }\n    }\n    let w = null;\n    if (prev && next && prev[1] !== null && next[1] !== null) {\n        if (next[0] - prev[0] <= LIVE) w = Math.round(prev[1]);\n        else if (prev[1] === 0 && next[1] === 0) w = 0;\n    }\n    if (w === null) { skipped++; continue; }\n    out.push({\n        method: 'POST',\n        url: '__PVDIARY_URL__/api/ingest/sample',\n        headers: { Authorization: 'Bearer __INGEST_TOKEN__', 'Content-Type': 'application/json' },\n        payload: { collector: '__COLLECTOR__', ts: ts, power_w: w },\n    });\n}\nnode.status({ fill: skipped ? 'yellow' : 'green', shape: 'dot',\n    text: msg.pvDate + ': ' + out.length + ' gevuld, ' + skipped + ' onbekend' });\nnode.warn('pvdiary backfill ' + msg.pvDate + ': ' + out.length + ' gevuld, ' + skipped + ' onbekend');\nreturn [out];\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 480,
+    "wires": [
+      [
+        "pvfill_post"
+      ]
+    ]
+  },
+  {
+    "id": "pvfill_post",
+    "type": "http request",
+    "z": "pvdiary_ingest",
+    "name": "POST /api/ingest/sample",
+    "method": "POST",
+    "ret": "txt",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 620,
+    "y": 480,
+    "wires": [
+      []
+    ],
+    "customHeaders": true,
+    "headerKeyInput": "headers"
+  }
+]

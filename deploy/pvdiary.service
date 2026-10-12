@@ -1,0 +1,21 @@
+[Unit]
+Description=PVdiary v3
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pvdiary
+WorkingDirectory=/opt/pvdiary
+Environment=PVDIARY_ADDR=127.0.0.1:8080
+Environment=PVDIARY_DB=/opt/pvdiary/pvdiary.db
+EnvironmentFile=/opt/pvdiary/pvdiary.env
+ExecStart=/opt/pvdiary/pvdiary serve
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/pvdiary
+
+[Install]
+WantedBy=multi-user.target

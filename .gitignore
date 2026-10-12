@@ -1,0 +1,10 @@
+weerstation.zip
+*.db
+/opt/
+node_modules/
+/dist/
+.superpowers/
+web/test-results/
+web/playwright-report/
+.env
+*.local.json
