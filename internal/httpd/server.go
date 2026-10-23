@@ -4,11 +4,24 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Serve start een HTTP-server op addr met handler h.
 func Serve(addr string, h http.Handler) error {
-	return http.ListenAndServe(addr, h)
+	return newServer(addr, h).ListenAndServe()
+}
+
+// newServer zet timeouts, zodat een client die headers of body nooit afmaakt of een
+// keep-alive-verbinding open laat, geen goroutine en file descriptor blijft vasthouden.
+func newServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 }
 
 // Router combineert de API-mux met de statische SPA (fallback naar index.html).
