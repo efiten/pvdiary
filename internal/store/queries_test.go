@@ -1,6 +1,7 @@
 package store
 
 import (
+	"strings"
 	"testing"
 
 	"pvdiary/internal/timeutil"
@@ -271,5 +272,29 @@ func TestLastUpdate(t *testing.T) {
 	ts, err := s.LastUpdate("")
 	if err != nil || ts != 1749611100 {
 		t.Fatalf("ts=%d err=%v, want 1749611100/nil", ts, err)
+	}
+}
+
+// Zonder collector filtert DaySamples alleen op ts. De primary key begint met
+// collector_id, dus zonder eigen index op ts scant elke query de hele sample-tabel,
+// en /api/daymax doet er tot 63 per request.
+func TestDaySamplesWithoutCollectorUsesTsIndex(t *testing.T) {
+	s := newTestStore(t)
+	rows, err := s.db.Query(`EXPLAIN QUERY PLAN SELECT ts, SUM(power_w) FROM sample WHERE ts >= ? AND ts < ? GROUP BY ts ORDER BY ts`, 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan strings.Builder
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan.WriteString(detail + "\n")
+	}
+	if !strings.Contains(plan.String(), "INDEX sample_ts") {
+		t.Fatalf("plan gebruikt sample_ts niet:\n%s", plan.String())
 	}
 }

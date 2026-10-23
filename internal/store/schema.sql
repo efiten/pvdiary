@@ -23,3 +23,7 @@ CREATE TABLE IF NOT EXISTS sample (
   power_w      INTEGER NOT NULL,
   PRIMARY KEY (collector_id, ts)
 );
+
+-- Zonder collector filtert DaySamples alleen op ts, en de primary key begint met
+-- collector_id. Zonder deze index scande elke dagquery de hele tabel.
+CREATE INDEX IF NOT EXISTS sample_ts ON sample(ts);
